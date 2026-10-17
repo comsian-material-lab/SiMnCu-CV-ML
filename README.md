@@ -6,9 +6,10 @@ Leakage-controlled validation · feature ablation · conformal intervals</p>
   <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-blue">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="Status" src="https://img.shields.io/badge/status-research%20code-orange">
-  <a href="https://doi.org/10.5281/zenodo.XXXXXXX"><img alt="DOI" src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.XXXXXXX-lightgrey"></a>
+  <a href="https://zenodo.org/records/23435101"><img alt="DOI" src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.XXXXXXX-lightgrey"></a>
   <a href="https://colab.research.google.com/github/YOUR_USER/Si-Mn-Cu-CV-ML/blob/main/Si-Mn-Cu_CV_ML_Colab.ipynb"><img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg"></a>
 </p>
+https://zenodo.org/records/23435101
 
 <p align="center">
   <a href="#1-overview">Overview</a> ·
@@ -231,8 +232,8 @@ If you use this code, please cite the repository (DOI after the first Zenodo rel
   title   = {Si-Mn-Cu-CV-ML: Machine-learning analysis of the cyclic voltammograms of a Si--Mn--Cu electrode},
   year    = {2026},
   version = {v1.0.0},
-  doi     = {10.5281/zenodo.XXXXXXX},
-  url     = {https://github.com/YOUR_USER/Si-Mn-Cu-CV-ML}
+  doi     = { DOI: 10.5281/zenodo.23435101},
+  url     = {https://[https://github.com/comsian-material-lab/Si-Mn-Cu-CV-ML]
 }
 ```
 
