@@ -1,0 +1,60 @@
+points: 12075 scan rates: [np.int64(10), np.int64(20), np.int64(30), np.int64(40), np.int64(50)]
+done 1 Random hold-out (80/20)
+done 2 Shuffled 5-fold
+done 3 Block 5-fold
+done 4 Leave-one-scan-rate-out
+done 5 Purged 5-fold (combined)
+                        Scheme          Model  R2_mean  R2_std  RMSE_mean  MAE_mean
+0    1 Random hold-out (80/20)    Extra Trees   0.9996     NaN     0.0012    0.0004
+1    1 Random hold-out (80/20)         HistGB   0.9998     NaN     0.0010    0.0006
+2    1 Random hold-out (80/20)       LightGBM   0.9998     NaN     0.0010    0.0006
+3    1 Random hold-out (80/20)  Random Forest   0.9997     NaN     0.0011    0.0005
+4            2 Shuffled 5-fold    Extra Trees   0.9996  0.0000     0.0013    0.0004
+5            2 Shuffled 5-fold         HistGB   0.9998  0.0000     0.0010    0.0006
+6            2 Shuffled 5-fold       LightGBM   0.9998  0.0000     0.0010    0.0006
+7            2 Shuffled 5-fold  Random Forest   0.9997  0.0000     0.0012    0.0005
+8               3 Block 5-fold    Extra Trees   0.0695  1.0355     0.0224    0.0179
+9               3 Block 5-fold         HistGB  -1.0033  1.3655     0.0363    0.0298
+10              3 Block 5-fold       LightGBM  -0.7205  0.5746     0.0367    0.0286
+11              3 Block 5-fold  Random Forest  -0.3643  0.8284     0.0313    0.0245
+12   4 Leave-one-scan-rate-out    Extra Trees   0.9900  0.0135     0.0052    0.0037
+13   4 Leave-one-scan-rate-out         HistGB   0.9829  0.0111     0.0080    0.0057
+14   4 Leave-one-scan-rate-out       LightGBM   0.9829  0.0111     0.0080    0.0057
+15   4 Leave-one-scan-rate-out  Random Forest   0.9828  0.0111     0.0080    0.0057
+16  5 Purged 5-fold (combined)    Extra Trees  -0.3227  1.4308     0.0288    0.0245
+17  5 Purged 5-fold (combined)         HistGB  -1.2733  0.8092     0.0430    0.0364
+18  5 Purged 5-fold (combined)       LightGBM  -1.2441  0.8317     0.0431    0.0365
+19  5 Purged 5-fold (combined)  Random Forest  -1.0181  1.1264     0.0412    0.0348
+             Feature_set                      Scheme   R2_mean    R2_std
+0  All (E, v, direction)   4 Leave-one-scan-rate-out    0.9900    0.0135
+1  All (E, v, direction)  5 Purged 5-fold (combined)   -0.3227    1.4308
+2           No direction   4 Leave-one-scan-rate-out    0.7817    0.0277
+3           No direction  5 Purged 5-fold (combined)  -19.0165   35.6400
+4           No scan rate   4 Leave-one-scan-rate-out    0.9522    0.0417
+5           No scan rate  5 Purged 5-fold (combined)   -0.5417    1.9709
+6                 E only   4 Leave-one-scan-rate-out    0.7053    0.0434
+7                 E only  5 Purged 5-fold (combined)  -18.0863   33.7747
+8     v + direction only   4 Leave-one-scan-rate-out    0.1244    0.0258
+9     v + direction only  5 Purged 5-fold (combined) -145.9637  315.5388
+  Held_out          Model      R2    RMSE     MAE
+0  10 mV/s    Extra Trees  0.9677  0.0097  0.0069
+1  10 mV/s  Random Forest  0.9676  0.0097  0.0069
+2  10 mV/s         HistGB  0.9676  0.0097  0.0069
+3  10 mV/s       LightGBM  0.9676  0.0097  0.0069
+4  50 mV/s    Extra Trees  0.9868  0.0088  0.0062
+5  50 mV/s  Random Forest  0.9866  0.0088  0.0062
+6  50 mV/s         HistGB  0.9868  0.0088  0.0062
+7  50 mV/s       LightGBM  0.9867  0.0088  0.0062
+                         Setting  coverage  half_width  Nominal
+0          Random split 60/20/20    0.8899      0.0004      0.9
+1             Purged block split    0.9693      0.0873      0.9
+2  Test 10 mV/s (calibration 40)    0.5576      0.0050      0.9
+3  Test 20 mV/s (calibration 40)    0.8844      0.0046      0.9
+4  Test 30 mV/s (calibration 40)    0.9536      0.0073      0.9
+5  Test 40 mV/s (calibration 30)    0.8358      0.0063      0.9
+6  Test 50 mV/s (calibration 30)    0.4500      0.0033      0.9
+     Feature  Mean_abs_SHAP
+0          E       0.048876
+2  direction       0.022415
+1          v       0.003301
+finished
