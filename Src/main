@@ -1,1 +1,217 @@
+"""Machine-learning analysis of Si-Mn-Cu cyclic voltammograms (10-50 mV/s).
+Same workflow as the TiO2-MnO2-GQDs study: predict current from potential,
+scan rate and sweep direction; compare models under five validation schemes;
+feature ablation; split-conformal intervals; SHAP importance. Seed = 42."""
+import os, re, glob, warnings, numpy as np, pandas as pd
+import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor, HistGradientBoostingRegressor
+from sklearn.model_selection import KFold, train_test_split
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from lightgbm import LGBMRegressor
+warnings.filterwarnings("ignore")
+SEED = 42; GAP = 50; ALPHA = 0.10
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(HERE, "..", "data"))
+OUT = os.path.join(HERE, "..", "Results"); os.makedirs(OUT, exist_ok=True)
+plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.spines.top": False, "axes.spines.right": False})
+
+# ---------- data ----------
+rows = []
+for f in sorted(glob.glob(os.path.join(DATA_DIR, "*.xlsb")), key=lambda p: int(re.match(r"(\d+)", os.path.basename(p)).group(1))):
+    v = int(re.match(r"(\d+)", os.path.basename(f)).group(1))     # scan rate from file name
+    sheet = pd.ExcelFile(f, engine="pyxlsb").sheet_names[1]
+    d = pd.read_excel(f, sheet_name=sheet, header=None, engine="pyxlsb").dropna().iloc[:, :3]
+    d.columns = ["point", "E", "I"]
+    dE = np.diff(d.E.values); dE = np.append(dE, dE[-1])
+    d["direction"] = np.where(dE > 0, 1, -1)          # +1 anodic (rising E), -1 cathodic
+    d["v"] = v; d["idx"] = np.arange(len(d)); rows.append(d)
+df = pd.concat(rows, ignore_index=True)
+RATES = sorted(df.v.unique()); FEATS = ["E", "v", "direction"]
+print("points:", len(df), "scan rates:", RATES)
+
+def metrics(y, p): return dict(R2=r2_score(y, p), RMSE=np.sqrt(mean_squared_error(y, p)), MAE=mean_absolute_error(y, p))
+def models():
+    return {"Extra Trees": ExtraTreesRegressor(60, random_state=SEED, n_jobs=-1),
+            "Random Forest": RandomForestRegressor(60, random_state=SEED, n_jobs=-1),
+            "HistGB": HistGradientBoostingRegressor(max_iter=250, learning_rate=0.08, random_state=SEED),
+            "LightGBM": LGBMRegressor(n_estimators=250, learning_rate=0.05, num_leaves=63, random_state=SEED, verbose=-1, n_jobs=4)}
+def fit_pred(m, tr, te, feats):
+    m.fit(df.loc[tr, feats], df.loc[tr, "I"]); return m.predict(df.loc[te, feats])
+
+def f_random():
+    tr, te = train_test_split(df.index.values, test_size=0.2, random_state=SEED); return [(tr, te)]
+def f_shuffled(): return [(a, b) for a, b in KFold(5, shuffle=True, random_state=SEED).split(df)]
+def f_block(gap=0):
+    folds = []
+    blk = (df.idx / df.groupby("v").idx.transform("count") * 5).astype(int).clip(upper=4)   # 5 contiguous blocks per curve
+    for k in range(5):
+        te = df.index[blk == k].values; keep = np.ones(len(df), bool); keep[te] = False
+        if gap:
+            for v in RATES:
+                s = (df.v == v)
+                ii = df.idx[s & (blk == k)]; lo, hi = ii.min() - gap, ii.max() + gap
+                keep[df.index[s & (df.idx >= lo) & (df.idx <= hi)].values] = False
+        folds.append((df.index[keep].values, te))
+    return folds
+def f_losro(): return [(df.index[df.v != v].values, df.index[df.v == v].values) for v in RATES]
+
+SCHEMES = {"1 Random hold-out (80/20)": f_random, "2 Shuffled 5-fold": f_shuffled,
+           "3 Block 5-fold": lambda: f_block(0), "4 Leave-one-scan-rate-out": f_losro,
+           "5 Purged 5-fold (combined)": lambda: f_block(GAP)}
+
+# ---------- validation schemes x models ----------
+fold_rows, oof = [], {}
+for sname, gen in SCHEMES.items():
+    folds = gen()
+    for mname in models():
+        pred = np.full(len(df), np.nan)
+        for k, (tr, te) in enumerate(folds):
+            p = fit_pred(models()[mname], tr, te, FEATS); pred[te] = p
+            fold_rows.append(dict(Scheme=sname, Model=mname, Fold=k + 1,
+                                  Held_out=(f"{RATES[k]} mV/s" if "scan-rate" in sname else ""), **metrics(df.I[te], p)))
+        oof[(sname, mname)] = pred
+    print("done", sname, flush=True)
+folds_df = pd.DataFrame(fold_rows)
+summ = folds_df.groupby(["Scheme", "Model"]).agg(R2_mean=("R2", "mean"), R2_std=("R2", "std"),
+       RMSE_mean=("RMSE", "mean"), MAE_mean=("MAE", "mean")).reset_index()
+print(summ.round(4).to_string())
+
+# ---------- feature ablation ----------
+ablate = {"All (E, v, direction)": FEATS, "No direction": ["E", "v"], "No scan rate": ["E", "direction"],
+          "E only": ["E"], "v + direction only": ["v", "direction"]}
+abl = []
+for aname, fs in ablate.items():
+    for sname in ["4 Leave-one-scan-rate-out", "5 Purged 5-fold (combined)"]:
+        r = [metrics(df.I[te], fit_pred(ExtraTreesRegressor(60, random_state=SEED, n_jobs=-1), tr, te, fs))["R2"]
+             for tr, te in SCHEMES[sname]()]
+        abl.append(dict(Feature_set=aname, Scheme=sname, R2_mean=np.mean(r), R2_std=np.std(r, ddof=1)))
+abl = pd.DataFrame(abl); print(abl.round(4).to_string())
+
+# ---------- extrapolation to edge scan rates ----------
+edge = []
+for v in [RATES[0], RATES[-1]]:
+    te = df.index[df.v == v].values
+    for mname in models():
+        edge.append(dict(Held_out=f"{v} mV/s", Model=mname, **metrics(df.I[te], oof[("4 Leave-one-scan-rate-out", mname)][te])))
+edge = pd.DataFrame(edge); print(edge.round(4).to_string())
+
+# ---------- split-conformal (Extra Trees, 90 %) ----------
+def conformal(tr, cal, te):
+    m = ExtraTreesRegressor(60, random_state=SEED, n_jobs=-1).fit(df.loc[tr, FEATS], df.I[tr])
+    res = np.abs(df.I[cal] - m.predict(df.loc[cal, FEATS])); n = len(res)
+    q = np.quantile(res, min(1, np.ceil((n + 1) * (1 - ALPHA)) / n))
+    p = m.predict(df.loc[te, FEATS]); return dict(coverage=np.mean(np.abs(df.I[te] - p) <= q), half_width=q)
+perm = np.random.RandomState(SEED).permutation(len(df)); n = len(df)
+c_rand = conformal(perm[:int(.6 * n)], perm[int(.6 * n):int(.8 * n)], perm[int(.8 * n):])
+blk = (df.idx / df.groupby("v").idx.transform("count") * 5).astype(int).clip(upper=4)
+def purged_train(train_blocks, test_b):
+    keep = np.isin(blk, train_blocks) & True
+    for v in RATES:
+        ii = df.idx[(df.v == v) & (blk == test_b)]; lo, hi = ii.min() - GAP, ii.max() + GAP
+        keep &= ~((df.v == v) & (df.idx >= lo) & (df.idx <= hi)).values
+    return df.index[keep].values
+tr_b = purged_train([0, 1, 2], 3); tr_b = np.setdiff1d(tr_b, df.index[(blk == 3)].values)
+cal_b = df.index[blk == 3].values; te_b = df.index[blk == 4].values
+# remove cal points within GAP of test block and training points within GAP of cal block
+def near(b, gap):
+    m = np.zeros(len(df), bool)
+    for v in RATES:
+        ii = df.idx[(df.v == v) & (blk == b)]; m |= ((df.v == v) & (df.idx >= ii.min() - gap) & (df.idx <= ii.max() + gap)).values
+    return df.index[m].values
+cal_b = np.setdiff1d(cal_b, near(4, GAP)); tr_b = np.setdiff1d(tr_b, near(3, GAP))
+c_blk = conformal(tr_b, cal_b, te_b)
+cs = []
+for v in RATES:
+    others = [r for r in RATES if r != v]; cal_v = others[len(others) // 2]
+    r = conformal(df.index[~df.v.isin([v, cal_v])].values, df.index[df.v == cal_v].values, df.index[df.v == v].values)
+    cs.append(dict(Setting=f"Test {v} mV/s (calibration {cal_v})", **r))
+conf = pd.DataFrame([dict(Setting="Random split 60/20/20", **c_rand), dict(Setting="Purged block split", **c_blk)] + cs)
+conf["Nominal"] = 1 - ALPHA; print(conf.round(4).to_string())
+
+# ---------- SHAP ----------
+import shap
+et = ExtraTreesRegressor(80, random_state=SEED, n_jobs=-1, min_samples_leaf=2).fit(df[FEATS], df.I)
+sub = df[FEATS].sample(600, random_state=SEED)
+sv = shap.TreeExplainer(et).shap_values(sub)
+shap_df = pd.DataFrame({"Feature": FEATS, "Mean_abs_SHAP": np.abs(sv).mean(0)}).sort_values("Mean_abs_SHAP", ascending=False)
+print(shap_df)
+
+# ---------- figures ----------
+cols = plt.cm.viridis(np.linspace(0, .9, len(RATES)))
+pk = []
+for v in RATES:
+    d = df[(df.v == v) & (df.direction == 1)]; j = d.I.idxmax(); pk.append((v, d.E[j], d.I[j]))
+pk = pd.DataFrame(pk, columns=["v", "E_at_max", "I_max_anodic"])
+fig, ax = plt.subplots(1, 2, figsize=(11, 4.2))
+for c, v in zip(cols, RATES):
+    d = df[df.v == v]; ax[0].plot(d.E, d.I * 1e3, color=c, lw=1.2, label=f"{v} mV/s")
+ax[0].set(xlabel="Potential (V)", ylabel="Current (mA)", title="Si-Mn-Cu cyclic voltammograms"); ax[0].legend(frameon=False)
+ax[1].plot(np.sqrt(pk.v), pk.I_max_anodic * 1e3, "o-"); ax[1].set(xlabel="√scan rate (√(mV/s))", ylabel="Max anodic current (mA)", title="Max anodic current vs √v")
+plt.tight_layout(); plt.savefig(f"{OUT}/cv_curves.png", dpi=200); plt.close()
+
+pur = oof[("5 Purged 5-fold (combined)", "Extra Trees")]
+fig, ax = plt.subplots(figsize=(5, 5)); lim = [df.I.min() * 1e3, df.I.max() * 1e3]
+for c, v in zip(cols, RATES):
+    s = (df.v == v).values; ax.scatter(df.I[s] * 1e3, pur[s] * 1e3, s=4, color=c, label=f"{v} mV/s")
+ax.plot(lim, lim, "k--", lw=1); ax.set(xlabel="Experimental current (mA)", ylabel="Predicted current (mA)",
+    title=f"Extra Trees, purged 5-fold CV\nR² = {r2_score(df.I, pur):.3f}"); ax.legend(frameon=False, markerscale=3)
+plt.tight_layout(); plt.savefig(f"{OUT}/Si-Mn-Cu_scatter_ET.png", dpi=200); plt.close()
+
+et_s = summ[summ.Model == "Extra Trees"]
+fig, ax = plt.subplots(figsize=(7.5, 3.8)); sd = et_s.R2_std.fillna(0).values
+ax.bar(range(5), et_s.R2_mean, yerr=sd, color="#4C72B0", capsize=3)
+ax.set_xticks(range(5)); ax.set_xticklabels([s.split(" ", 1)[0] for s in et_s.Scheme]); ax.set_ylim(min(0.5, et_s.R2_mean.min() - .05), 1.03)
+for i, (m, s) in enumerate(zip(et_s.R2_mean, sd)): ax.text(i, min(1.0, m + s) + .006, f"{m:.3f}", ha="center", fontsize=8)
+ax.set(ylabel="R²", xlabel="Scheme: 1 random, 2 shuffled, 3 block, 4 leave-one-rate-out, 5 purged", title="Extra Trees R² by validation scheme")
+plt.tight_layout(); plt.savefig(f"{OUT}/validation_schemes_short.png", dpi=200); plt.close()
+
+pv = summ[summ.Scheme.str.startswith("5")]; lv = summ[summ.Scheme.str.startswith("4")]
+fig, ax = plt.subplots(figsize=(7, 3.8)); w = .38; x = np.arange(4)
+ax.bar(x - w / 2, pv.R2_mean.values, w, yerr=pv.R2_std.values, label="Purged 5-fold", capsize=3)
+ax.bar(x + w / 2, lv.R2_mean.values, w, yerr=lv.R2_std.values, label="Leave-one-scan-rate-out", capsize=3)
+ax.set_xticks(x); ax.set_xticklabels(pv.Model.values); ax.set_ylim(0.0, 1.05); ax.set_ylabel("R²"); ax.legend(frameon=False)
+ax.set_title("Model comparison, leakage-controlled validation"); plt.tight_layout(); plt.savefig(f"{OUT}/purged_models_short.png", dpi=200); plt.close()
+
+fig, ax = plt.subplots(figsize=(7.5, 3.8)); a2 = abl.pivot(index="Feature_set", columns="Scheme", values="R2_mean").loc[list(ablate)]
+a2.plot.barh(ax=ax); ax.set_xlabel("R² (Extra Trees)"); ax.set_ylabel(""); ax.invert_yaxis(); ax.legend(frameon=False, fontsize=8)
+ax.set_title("Feature ablation"); plt.tight_layout(); plt.savefig(f"{OUT}/feature_ablation.png", dpi=200); plt.close()
+
+fig, ax = plt.subplots(figsize=(5, 3)); ax.barh(shap_df.Feature[::-1], shap_df.Mean_abs_SHAP[::-1] * 1e3, color="#C44E52")
+ax.set(xlabel="Mean |SHAP| (mA)", title="SHAP importance (Extra Trees)"); plt.tight_layout(); plt.savefig(f"{OUT}/shap_importance.png", dpi=200); plt.close()
+
+fig, axs = plt.subplots(1, 3, figsize=(14, 4))
+for a, v in zip(axs, [RATES[0], RATES[len(RATES) // 2], RATES[-1]]):
+    tr, te = df.index[df.v != v].values, df.index[df.v == v].values; d = df.loc[te]
+    p_all = oof[("4 Leave-one-scan-rate-out", "Extra Trees")][te]
+    p_nd = fit_pred(ExtraTreesRegressor(60, random_state=SEED, n_jobs=-1), tr, te, ["E", "v"])
+    a.plot(d.E, d.I * 1e3, "k", lw=1.5, label="Experimental"); a.plot(d.E, p_all * 1e3, "r", lw=1, label=f"With direction (R²={r2_score(d.I, p_all):.3f})")
+    a.plot(d.E, p_nd * 1e3, "b--", lw=1, label=f"No direction (R²={r2_score(d.I, p_nd):.3f})")
+    a.set(title=f"Held-out {v} mV/s", xlabel="Potential (V)", ylabel="Current (mA)"); a.legend(frameon=False, fontsize=7)
+plt.tight_layout(); plt.savefig(f"{OUT}/sweep_direction_check.png", dpi=200); plt.close()
+
+# ---------- Excel report ----------
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
+wb = Workbook(); wb.remove(wb.active)
+def put(name, frame, note=None):
+    ws = wb.create_sheet(name); r0 = 1
+    if note: ws.cell(1, 1, note).font = Font(name="Arial", italic=True, size=9); r0 = 3
+    for j, c in enumerate(frame.columns, 1):
+        x = ws.cell(r0, j, c); x.font = Font(name="Arial", bold=True, color="FFFFFF"); x.fill = PatternFill("solid", fgColor="305496")
+    for i, row in enumerate(frame.itertuples(index=False), r0 + 1):
+        for j, val in enumerate(row, 1):
+            val = float(val) if isinstance(val, (np.floating, float)) else (int(val) if isinstance(val, np.integer) else val)
+            x = ws.cell(i, j, val); x.font = Font(name="Arial")
+            if isinstance(val, float): x.number_format = "0.0000" if (abs(val) > 1e-3 or val == 0) else "0.00E+00"
+    for j in range(1, len(frame.columns) + 1): ws.column_dimensions[get_column_letter(j)].width = 28
+    ws.freeze_panes = ws.cell(r0 + 1, 1)
+info = pd.DataFrame({"Item": ["Sample", "Scan rates (mV/s)", "Points", "Features", "Target", "Seed", "Purge gap (points)", "Conformal level", "Note"],
+    "Value": ["Si-Mn-Cu", ", ".join(map(str, RATES)), len(df), "E, scan rate, sweep direction", "Current (A)", SEED, GAP, f"{1-ALPHA:.0%}",
+              "Hyper-parameters fixed (no nested tuning). One curve per scan rate: results do not show transfer to independent experiments."]})
+put("Overview", info); put("Summary_by_scheme", summ, "Mean and SD of per-fold R2; computed in Python (Src/main.py)")
+put("Per_fold", folds_df); put("Feature_ablation", abl); put("Edge_extrapolation", edge, "Leave-one-scan-rate-out at the lowest and highest scan rate")
+put("Conformal", conf); put("SHAP", shap_df); put("CV_max_current", pk, "Maximum anodic current on the rising sweep (not a fitted peak)")
+put("Data", df[["v", "idx", "E", "I", "direction"]].rename(columns={"v": "scan_rate_mV_s", "idx": "index", "E": "E_V", "I": "I_A"}))
+wb.save(f"{OUT}/Si-Mn-Cu_CV_ML_results.xlsx"); print("finished")
 
