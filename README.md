@@ -9,7 +9,6 @@ Leakage-controlled validation · feature ablation · conformal intervals</p>
   <a href="https://zenodo.org/records/23435101"><img alt="DOI" src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.XXXXXXX-lightgrey"></a>
   <a href="https://colab.research.google.com/github/YOUR_USER/Si-Mn-Cu-CV-ML/blob/main/Si-Mn-Cu_CV_ML_Colab.ipynb"><img alt="Open in Colab" src="https://colab.research.google.com/assets/colab-badge.svg"></a>
 </p>
-https://zenodo.org/records/23435101
 
 <p align="center">
   <a href="#1-overview">Overview</a> ·
