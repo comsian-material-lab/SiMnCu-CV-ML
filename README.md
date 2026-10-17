@@ -126,7 +126,7 @@ Split-conformal 90 % intervals covered only **36 %** of held-out points (half-wi
   <img src="Results/Fig15_sweep_direction_check.png" width="90%" alt="Effect of sweep direction on held-out curves">
 </p>
 <p align="center">
-  <img src="Results/Results/download (5).png" width="75%" alt="Anodic and cathodic sweep labels">
+  <img src="Results/Results/download(5).png" width="75%" alt="Anodic and cathodic sweep labels">
 </p>
 
 ## 4. Quick start
